@@ -13,6 +13,19 @@ class WordBankBackground {
       chrome.runtime.onInstalled.addListener(() => {
         this.createContextMenu();
       });
+
+      // Automatically update badge when word bank changes
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.wordBank) {
+          const wordBank = changes.wordBank.newValue || {};
+          chrome.action.setBadgeText({
+            text: Object.keys(wordBank).length > 0 ? Object.keys(wordBank).length.toString() : ''
+          });
+          chrome.action.setBadgeBackgroundColor({
+            color: '#4CAF50'
+          });
+        }
+      });
     }
   
     createContextMenu() {
@@ -35,125 +48,16 @@ class WordBankBackground {
     async handleMessage(request, sender, sendResponse) {
       console.log('Background script received message:', request.action);
       
-      // Wrap the entire handler in a Promise to ensure async operations complete
-      const handleRequest = async () => {
+      // Only handle context menu related actions
+      if (request.action === 'updateBadge') {
         try {
-          switch (request.action) {
-            case 'saveWord':
-              console.log('Attempting to save word:', request.wordEntry.word);
-              const result = await this.saveWordToStorage(request.wordEntry);
-              console.log('Save result:', result);
-              return { success: result };
-              
-            case 'getWordBank':
-              console.log('Fetching word bank');
-              const wordBank = await this.getWordBank();
-              console.log('Word bank retrieved:', Object.keys(wordBank).length, 'words');
-              return { wordBank: wordBank };
-              
-            case 'deleteWord':
-              console.log('Attempting to delete word:', request.word);
-              const deleted = await this.deleteWord(request.word);
-              console.log('Delete result:', deleted);
-              return { success: deleted };
-              
-            case 'exportWordBank':
-              console.log('Exporting word bank');
-              const exportData = await this.exportWordBank();
-              return { data: exportData };
-          }
+          this.updateBadge(request.count);
+          sendResponse({ success: true });
         } catch (error) {
-          console.error('Error handling message:', error);
-          return { success: false, error: error.message };
+          console.error('Error updating badge:', error);
+          sendResponse({ success: false });
         }
-      };
-
-      // Execute the handler and send the response
-      handleRequest().then(response => {
-        console.log('Sending response:', response);
-        sendResponse(response);
-      });
-
-      return true; // Keep message channel open for async response
-    }
-  
-    async saveWordToStorage(wordEntry) {
-      try {
-        console.log('Getting existing word bank...');
-        const result = await chrome.storage.local.get(['wordBank']);
-        const wordBank = result.wordBank || {};
-        console.log('Current word bank size:', Object.keys(wordBank).length);
-        
-        // Add new word (or update existing)
-        wordBank[wordEntry.word] = {
-          ...wordEntry,
-          lastUpdated: Date.now()
-        };
-        console.log('Updated word bank size:', Object.keys(wordBank).length);
-        
-        // Save back to storage
-        console.log('Saving to chrome.storage...');
-        await chrome.storage.local.set({ wordBank });
-        console.log('Storage update complete');
-        
-        // Update badge
-        this.updateBadge(Object.keys(wordBank).length);
-        
         return true;
-      } catch (error) {
-        console.error('Error in saveWordToStorage:', error);
-        return false;
-      }
-    }
-  
-    async getWordBank() {
-      try {
-        console.log('Getting word bank from storage...');
-        const result = await chrome.storage.local.get(['wordBank']);
-        if (!result.wordBank) {
-          console.log('No word bank found, initializing empty bank');
-          const emptyBank = {};
-          await chrome.storage.local.set({ wordBank: emptyBank });
-          return emptyBank;
-        }
-        console.log('Word bank retrieved successfully');
-        return result.wordBank;
-      } catch (error) {
-        console.error('Error in getWordBank:', error);
-        return {};
-      }
-    }
-  
-    async deleteWord(word) {
-      try {
-        const result = await chrome.storage.local.get(['wordBank']);
-        const wordBank = result.wordBank || {};
-        
-        if (wordBank[word]) {
-          delete wordBank[word];
-          await chrome.storage.local.set({ wordBank });
-          this.updateBadge(Object.keys(wordBank).length);
-          return true;
-        }
-        return false;
-      } catch (error) {
-        console.error('Error deleting word:', error);
-        return false;
-      }
-    }
-  
-    async exportWordBank() {
-      try {
-        const wordBank = await this.getWordBank();
-        const exportData = {
-          exportDate: new Date().toISOString(),
-          totalWords: Object.keys(wordBank).length,
-          words: Object.values(wordBank).sort((a, b) => b.timestamp - a.timestamp)
-        };
-        return exportData;
-      } catch (error) {
-        console.error('Error exporting word bank:', error);
-        return null;
       }
     }
   
@@ -168,8 +72,13 @@ class WordBankBackground {
   
     // Initialize badge count on startup
     async initializeBadge() {
-      const wordBank = await this.getWordBank();
-      this.updateBadge(Object.keys(wordBank).length);
+      try {
+        const result = await chrome.storage.local.get(['wordBank']);
+        const wordBank = result.wordBank || {};
+        this.updateBadge(Object.keys(wordBank).length);
+      } catch (error) {
+        console.error('Error initializing badge:', error);
+      }
     }
   }
   

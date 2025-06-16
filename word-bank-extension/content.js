@@ -160,23 +160,28 @@ class WordBankExtension {
         };
         console.log('Word entry prepared:', wordEntry);
 
-        // Send to background script for storage and wait for response
-        const response = await new Promise((resolve) => {
-          console.log('Sending message to background script...');
-          chrome.runtime.sendMessage({
-            action: 'saveWord',
-            wordEntry: wordEntry
-          }, (response) => {
-            console.log('Received response from background:', response);
-            resolve(response);
+        // Save directly to storage
+        const result = await new Promise((resolve) => {
+          chrome.storage.local.get(['wordBank'], (result) => {
+            const wordBank = result.wordBank || {};
+            wordBank[this.selectedWord] = wordEntry;
+            
+            chrome.storage.local.set({ wordBank }, () => {
+              // Update badge count
+              chrome.runtime.sendMessage({
+                action: 'updateBadge',
+                count: Object.keys(wordBank).length
+              });
+              resolve(true);
+            });
           });
         });
 
-        if (response && response.success) {
+        if (result) {
           console.log('Word saved successfully');
           this.showSaveConfirmation();
         } else {
-          console.error('Failed to save word - no success response');
+          console.error('Failed to save word');
           throw new Error('Failed to save word');
         }
       } catch (error) {

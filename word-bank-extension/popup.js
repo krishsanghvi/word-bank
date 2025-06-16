@@ -18,23 +18,16 @@ class WordBankPopup {
     async loadWordBank() {
       try {
         console.log('Popup: Loading word bank...');
-        const response = await new Promise((resolve) => {
-          chrome.runtime.sendMessage({ action: 'getWordBank' }, (response) => {
-            console.log('Popup: Raw response from background:', response);
-            resolve(response);
+        
+        // Access storage directly instead of through background script
+        const result = await new Promise((resolve) => {
+          chrome.storage.local.get(['wordBank'], (result) => {
+            console.log('Popup: Direct storage access result:', result);
+            resolve(result);
           });
         });
-        
-        console.log('Popup: Processed word bank response:', response);
-        
-        if (!response) {
-          console.error('Popup: No response received from background script');
-          this.wordBank = {};
-          this.filteredWords = [];
-          return;
-        }
 
-        this.wordBank = response.wordBank || {};
+        this.wordBank = result.wordBank || {};
         this.filteredWords = Object.values(this.wordBank);
         console.log('Popup: Word bank loaded with', Object.keys(this.wordBank).length, 'words');
         
@@ -45,6 +38,9 @@ class WordBankPopup {
         console.error('Popup: Error loading word bank:', error);
         this.wordBank = {};
         this.filteredWords = [];
+        // Still update UI even if there's an error
+        this.renderWordList();
+        this.updateStats();
       }
     }
   
@@ -246,6 +242,37 @@ class WordBankPopup {
       } catch (error) {
         console.error('Error exporting word bank:', error);
         alert('Failed to export word bank. Please try again.');
+      }
+    }
+
+    async saveWord(wordEntry) {
+      try {
+        console.log('Popup: Saving word:', wordEntry.word);
+        const result = await new Promise((resolve) => {
+          chrome.storage.local.get(['wordBank'], (result) => {
+            const wordBank = result.wordBank || {};
+            wordBank[wordEntry.word] = {
+              ...wordEntry,
+              lastUpdated: Date.now()
+            };
+            chrome.storage.local.set({ wordBank }, () => {
+              resolve(true);
+            });
+          });
+        });
+
+        if (result) {
+          // Update local state
+          this.wordBank[wordEntry.word] = wordEntry;
+          this.filteredWords = Object.values(this.wordBank);
+          this.renderWordList();
+          this.updateStats();
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error('Popup: Error saving word:', error);
+        return false;
       }
     }
   }
