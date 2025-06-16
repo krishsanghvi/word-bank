@@ -27,16 +27,17 @@ class WordBankPopup {
           });
         });
 
-        this.wordBank = result.wordBank || {};
-        this.filteredWords = Object.values(this.wordBank);
-        console.log('Popup: Word bank loaded with', Object.keys(this.wordBank).length, 'words');
+        // Handle word bank as an array
+        this.wordBank = Array.isArray(result.wordBank) ? result.wordBank : [];
+        this.filteredWords = [...this.wordBank];
+        console.log('Popup: Word bank loaded with', this.wordBank.length, 'words');
         
         // Update the UI
         this.renderWordList();
         this.updateStats();
       } catch (error) {
         console.error('Popup: Error loading word bank:', error);
-        this.wordBank = {};
+        this.wordBank = [];
         this.filteredWords = [];
         // Still update UI even if there's an error
         this.renderWordList();
@@ -74,14 +75,14 @@ class WordBankPopup {
       const term = searchTerm.toLowerCase().trim();
       
       if (!term) {
-        this.filteredWords = Object.values(this.wordBank);
+        this.filteredWords = [...this.wordBank];
       } else {
-        this.filteredWords = Object.values(this.wordBank).filter(word => 
+        this.filteredWords = this.wordBank.filter(word => 
           word.word.toLowerCase().includes(term) ||
-          word.definitions.some(def => 
+          (word.definitions && word.definitions.some(def => 
             def.definition.toLowerCase().includes(term) ||
-            def.partOfSpeech.toLowerCase().includes(term)
-          )
+            (def.partOfSpeech && def.partOfSpeech.toLowerCase().includes(term))
+          ))
         );
       }
       
@@ -107,7 +108,7 @@ class WordBankPopup {
     renderWordList() {
       const wordList = document.getElementById('wordList');
       
-      if (this.filteredWords.length === 0) {
+      if (!this.filteredWords || this.filteredWords.length === 0) {
         wordList.innerHTML = `
           <div class="empty-state">
             <h3>No words yet!</h3>
@@ -116,63 +117,121 @@ class WordBankPopup {
         `;
         return;
       }
+
+      // Debug log to see the structure of filtered words
+      console.log('Filtered words:', this.filteredWords);
   
-      const wordsHtml = this.filteredWords.map(word => this.createWordItem(word)).join('');
-      wordList.innerHTML = wordsHtml;
-  
-      // Add event listeners for delete buttons
-      wordList.querySelectorAll('.delete-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const wordToDelete = e.target.dataset.word;
-          this.deleteWord(wordToDelete);
-        });
+      wordList.innerHTML = ''; // Clear the list first
+      this.filteredWords.forEach(word => {
+        if (word && typeof word === 'object') {
+          const wordElement = this.createWordItem(word);
+          if (wordElement) {
+            wordList.appendChild(wordElement);
+          }
+        }
       });
     }
   
     createWordItem(word) {
-      const date = new Date(word.timestamp).toLocaleDateString();
-      const mainDefinition = word.definitions.length > 0 
-        ? word.definitions[0] 
-        : { definition: 'No definition available', partOfSpeech: '' };
-  
-      const sourceInfo = word.pageTitle 
-        ? `from "${word.pageTitle}"` 
-        : `from ${new URL(word.url).hostname}`;
-  
-      return `
-        <div class="word-item">
-          <div class="word-header">
-            <div class="word-title">${word.word}</div>
-            <div class="word-date">${date}</div>
-          </div>
-          
-          ${mainDefinition.partOfSpeech ? `<div class="part-of-speech" style="display: inline-block; background: #e8f5e8; color: #2e7d32; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-bottom: 5px;">${mainDefinition.partOfSpeech}</div>` : ''}
-          
-          <div class="word-definition">${mainDefinition.definition}</div>
-          
-          <div class="word-source">${sourceInfo}</div>
-          
-          <div class="word-actions">
-            <button class="action-btn delete-btn" data-word="${word.word}">🗑️ Delete</button>
-          </div>
-        </div>
-      `;
+        if (!word || typeof word !== 'object') {
+            console.error('Invalid word object:', word);
+            return null;
+        }
+
+        console.log('Creating word item for:', word);
+        
+        const wordItem = document.createElement('div');
+        wordItem.className = 'word-item';
+        
+        // Create word header
+        const wordHeader = document.createElement('div');
+        wordHeader.className = 'word-header';
+        
+        const wordText = document.createElement('span');
+        wordText.className = 'word-text';
+        wordText.textContent = word.word || 'Unknown word';
+        
+        const timestamp = document.createElement('span');
+        timestamp.className = 'timestamp';
+        timestamp.textContent = word.timestamp ? new Date(word.timestamp).toLocaleDateString() : 'Unknown date';
+        
+        wordHeader.appendChild(wordText);
+        wordHeader.appendChild(timestamp);
+        
+        // Create word details
+        const wordDetails = document.createElement('div');
+        wordDetails.className = 'word-details';
+        
+        // Add definitions if they exist
+        if (word.definitions && Array.isArray(word.definitions)) {
+            const definitionsList = document.createElement('ul');
+            definitionsList.className = 'definitions-list';
+            
+            word.definitions.forEach(def => {
+                if (def && typeof def === 'object') {
+                    const li = document.createElement('li');
+                    li.textContent = def.definition || 'No definition available';
+                    definitionsList.appendChild(li);
+                }
+            });
+            
+            if (definitionsList.children.length > 0) {
+                wordDetails.appendChild(definitionsList);
+            }
+        }
+        
+        // Add source information with URL
+        const sourceInfo = document.createElement('div');
+        sourceInfo.className = 'source-info';
+        
+        // Create source link
+        const sourceLink = document.createElement('a');
+        sourceLink.href = word.url || '#';
+        sourceLink.target = '_blank';
+        sourceLink.className = 'source-link';
+        sourceLink.textContent = word.pageTitle || 'Source';
+        sourceLink.title = word.url || '';
+        
+        // Create URL display
+        const urlDisplay = document.createElement('div');
+        urlDisplay.className = 'url-display';
+        urlDisplay.textContent = word.url || 'No URL available';
+        
+        sourceInfo.appendChild(sourceLink);
+        sourceInfo.appendChild(urlDisplay);
+        wordDetails.appendChild(sourceInfo);
+        
+        // Add delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-word-btn';
+        deleteBtn.textContent = '×';
+        deleteBtn.title = 'Delete word';
+        deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.deleteWord(word.word);
+        };
+        
+        wordItem.appendChild(wordHeader);
+        wordItem.appendChild(wordDetails);
+        wordItem.appendChild(deleteBtn);
+        
+        return wordItem;
     }
   
     async deleteWord(wordToDelete) {
       if (confirm(`Are you sure you want to delete "${wordToDelete}" from your word bank?`)) {
         try {
-          const response = await chrome.runtime.sendMessage({
-            action: 'deleteWord',
-            word: wordToDelete
-          });
+          // Remove word from storage
+          const result = await chrome.storage.local.get('wordBank');
+          const wordBank = Array.isArray(result.wordBank) ? result.wordBank : [];
+          const updatedWordBank = wordBank.filter(word => word.word !== wordToDelete);
+          await chrome.storage.local.set({ wordBank: updatedWordBank });
           
-          if (response.success) {
-            delete this.wordBank[wordToDelete];
-            this.filteredWords = this.filteredWords.filter(word => word.word !== wordToDelete);
-            this.renderWordList();
-            this.updateStats();
-          }
+          // Update local state
+          this.wordBank = updatedWordBank;
+          this.filteredWords = this.filteredWords.filter(word => word.word !== wordToDelete);
+          this.renderWordList();
+          this.updateStats();
         } catch (error) {
           console.error('Error deleting word:', error);
           alert('Failed to delete word. Please try again.');
@@ -183,14 +242,8 @@ class WordBankPopup {
     async clearAllWords() {
       if (confirm('Are you sure you want to clear your entire word bank? This action cannot be undone.')) {
         try {
-          // Delete each word individually
-          const deletePromises = Object.keys(this.wordBank).map(word => 
-            chrome.runtime.sendMessage({ action: 'deleteWord', word })
-          );
-          
-          await Promise.all(deletePromises);
-          
-          this.wordBank = {};
+          await chrome.storage.local.set({ wordBank: [] });
+          this.wordBank = [];
           this.filteredWords = [];
           this.renderWordList();
           this.updateStats();
@@ -202,14 +255,27 @@ class WordBankPopup {
     }
   
     updateStats() {
-      const totalWords = Object.keys(this.wordBank).length;
-      const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-      const thisWeekWords = Object.values(this.wordBank).filter(
-        word => word.timestamp > oneWeekAgo
-      ).length;
-  
-      document.getElementById('totalWords').textContent = totalWords;
-      document.getElementById('thisWeek').textContent = thisWeekWords;
+        try {
+            const totalWords = this.wordBank.length;
+            const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+            const thisWeekWords = this.wordBank.filter(
+                word => word.timestamp > oneWeekAgo
+            ).length;
+
+            // Get stat elements
+            const totalWordsElement = document.querySelector('.stat-number');
+            const thisWeekElement = document.querySelector('.stat-label');
+
+            // Update stats if elements exist
+            if (totalWordsElement) {
+                totalWordsElement.textContent = totalWords;
+            }
+            if (thisWeekElement) {
+                thisWeekElement.textContent = `${thisWeekWords} words this week`;
+            }
+        } catch (error) {
+            console.error('Error updating stats:', error);
+        }
     }
   
     async exportWordBank() {

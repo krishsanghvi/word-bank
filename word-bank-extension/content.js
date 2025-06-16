@@ -24,8 +24,10 @@ class WordBankExtension {
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
         this.selectionCoords = {
-          x: rect.left + window.scrollX,
-          y: rect.bottom + window.scrollY
+          x: rect.left,
+          y: rect.bottom,
+          width: rect.width,
+          height: rect.height
         };
       } else {
         this.selectedWord = '';
@@ -69,20 +71,53 @@ class WordBankExtension {
         </div>
       `;
   
-      // Calculate popup position
-      const popupWidth = 320;
-      const popupHeight = 200;
+      // Add popup to document first (but make it invisible) to get its dimensions
+      this.definitionPopup.style.visibility = 'hidden';
+      document.body.appendChild(this.definitionPopup);
+      
+      // Get popup dimensions
+      const popupRect = this.definitionPopup.getBoundingClientRect();
+      const popupWidth = popupRect.width;
+      const popupHeight = popupRect.height;
+      
+      // Get viewport dimensions
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
       
-      // Ensure popup stays within viewport
-      const left = Math.min(Math.max(x, 0), viewportWidth - popupWidth);
-      const top = Math.min(Math.max(y, 0), viewportHeight - popupHeight);
-
+      // Get word position
+      const wordRect = this.selectionCoords;
+      
+      // Calculate position
+      let left, top;
+      
+      // Horizontal positioning (center under the word)
+      left = wordRect.x + (wordRect.width / 2) - (popupWidth / 2);
+      
+      // Ensure popup stays within viewport horizontally
+      if (left < 10) {
+        left = 10; // Keep some margin from the left edge
+      } else if (left + popupWidth > viewportWidth - 10) {
+        left = viewportWidth - popupWidth - 10; // Keep some margin from the right edge
+      }
+      
+      // Vertical positioning (below the word)
+      top = wordRect.y + 5; // 5px gap between word and popup
+      
+      // If popup would go below viewport, position it above the word
+      if (top + popupHeight > viewportHeight - 10) {
+        top = wordRect.y - popupHeight - 5; // 5px gap above word
+      }
+      
+      // Add scroll offset
+      top += window.scrollY;
+      left += window.scrollX;
+      
+      // Apply the position and make popup visible
+      this.definitionPopup.style.position = 'absolute';
       this.definitionPopup.style.left = `${left}px`;
       this.definitionPopup.style.top = `${top}px`;
-  
-      document.body.appendChild(this.definitionPopup);
+      this.definitionPopup.style.visibility = 'visible';
+      this.definitionPopup.style.zIndex = '999999';
   
       // Add event listeners
       this.definitionPopup.querySelector('.close-btn').addEventListener('click', this.hidePopup.bind(this));
@@ -101,6 +136,9 @@ class WordBankExtension {
   
         const data = await response.json();
         const entry = data[0];
+        
+        // Store definitions for later use
+        this.definitions = this.extractDefinitions(entry);
         
         let definitionsHtml = '';
         
@@ -129,7 +167,7 @@ class WordBankExtension {
   
         // Add save functionality
         const saveBtn = contentDiv.querySelector('.save-word-btn');
-        saveBtn.addEventListener('click', () => this.saveWord(entry));
+        saveBtn.addEventListener('click', () => this.saveWord());
   
       } catch (error) {
         const contentDiv = this.definitionPopup.querySelector('.popup-content');
@@ -142,52 +180,57 @@ class WordBankExtension {
           </div>
         `;
   
+        // Clear definitions when word is not found
+        this.definitions = [];
         const saveBtn = contentDiv.querySelector('.save-word-btn');
-        saveBtn.addEventListener('click', () => this.saveWord(null));
+        saveBtn.addEventListener('click', () => this.saveWord());
       }
     }
   
-    async saveWord(definitionData) {
-      try {
-        console.log('Attempting to save word:', this.selectedWord);
-        const wordEntry = {
-          word: this.selectedWord,
-          timestamp: Date.now(),
-          url: window.location.href,
-          pageTitle: document.title,
-          definitions: definitionData ? this.extractDefinitions(definitionData) : [],
-          saved: true
-        };
-        console.log('Word entry prepared:', wordEntry);
+    async saveWord() {
+        try {
+            // Check if extension context is valid
+            if (!chrome.runtime?.id) {
+                throw new Error('Extension context invalidated');
+            }
 
-        // Save directly to storage
-        const result = await new Promise((resolve) => {
-          chrome.storage.local.get(['wordBank'], (result) => {
-            const wordBank = result.wordBank || {};
-            wordBank[this.selectedWord] = wordEntry;
+            console.log('Attempting to save word:', this.selectedWord);
+            const wordEntry = {
+                word: this.selectedWord,
+                timestamp: Date.now(),
+                url: window.location.href,
+                pageTitle: document.title,
+                definitions: this.definitions || [], // Use stored definitions or empty array
+                saved: true
+            };
+            console.log('Word entry prepared:', wordEntry);
+
+            // Save to storage
+            const result = await chrome.storage.local.get('wordBank');
+            const wordBank = Array.isArray(result.wordBank) ? result.wordBank : [];
+            wordBank.push(wordEntry);
+            await chrome.storage.local.set({ wordBank });
+            console.log('Word saved successfully');
+
+            // Show confirmation before closing
+            this.showSaveConfirmation();
             
-            chrome.storage.local.set({ wordBank }, () => {
-              // Update badge count
-              chrome.runtime.sendMessage({
-                action: 'updateBadge',
-                count: Object.keys(wordBank).length
-              });
-              resolve(true);
-            });
-          });
-        });
-
-        if (result) {
-          console.log('Word saved successfully');
-          this.showSaveConfirmation();
-        } else {
-          console.error('Failed to save word');
-          throw new Error('Failed to save word');
+            // Close popup after a short delay
+            setTimeout(() => {
+                this.closePopup();
+            }, 1500);
+        } catch (error) {
+            console.error('Error saving word:', error);
+            
+            // Handle extension context invalidation
+            if (error.message === 'Extension context invalidated') {
+                this.showNotification('Extension was reloaded. Please refresh the page to continue using the word bank.', 'error');
+            } else {
+                this.showNotification('Error saving word. Please try again.', 'error');
+            }
+            
+            this.closePopup();
         }
-      } catch (error) {
-        console.error('Error saving word:', error);
-        this.showSaveError();
-      }
     }
   
     extractDefinitions(data) {
@@ -205,31 +248,23 @@ class WordBankExtension {
     }
   
     showSaveConfirmation() {
-      const saveBtn = this.definitionPopup.querySelector('.save-word-btn');
-      const originalText = saveBtn.textContent;
-      saveBtn.textContent = '✅ Saved!';
-      saveBtn.style.backgroundColor = '#4CAF50';
-      
-      setTimeout(() => {
-        if (this.definitionPopup) {
-          saveBtn.textContent = originalText;
-          saveBtn.style.backgroundColor = '';
-        }
-      }, 2000);
+        const popup = document.getElementById('word-bank-popup');
+        if (!popup) return;
+
+        const message = document.createElement('div');
+        message.className = 'save-confirmation';
+        message.textContent = 'Word saved successfully!';
+        popup.appendChild(message);
     }
   
     showSaveError() {
-      const saveBtn = this.definitionPopup.querySelector('.save-word-btn');
-      const originalText = saveBtn.textContent;
-      saveBtn.textContent = '❌ Save Failed';
-      saveBtn.style.backgroundColor = '#f44336';
-      
-      setTimeout(() => {
-        if (this.definitionPopup) {
-          saveBtn.textContent = originalText;
-          saveBtn.style.backgroundColor = '';
-        }
-      }, 2000);
+        const popup = document.getElementById('word-bank-popup');
+        if (!popup) return;
+
+        const message = document.createElement('div');
+        message.className = 'save-error';
+        message.textContent = 'Error saving word. Please try again.';
+        popup.appendChild(message);
     }
   
     hidePopup() {
@@ -237,6 +272,54 @@ class WordBankExtension {
         this.definitionPopup.remove();
         this.definitionPopup = null;
       }
+    }
+
+    closePopup() {
+        if (this.definitionPopup) {
+            this.definitionPopup.remove();
+            this.definitionPopup = null;
+        }
+        // Clear any existing notification
+        const existingNotification = document.querySelector('.word-bank-notification');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+    }
+
+    showNotification(message, type = 'success') {
+        // Remove any existing notification
+        const existingNotification = document.querySelector('.word-bank-notification');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+
+        const notification = document.createElement('div');
+        notification.className = `word-bank-notification ${type}`;
+        notification.textContent = message;
+        
+        // Add styles for the notification
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 4px;
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 14px;
+            z-index: 10000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            transition: opacity 0.3s ease;
+            ${type === 'error' ? 'background-color: #d32f2f;' : 'background-color: #4caf50;'}
+        `;
+
+        document.body.appendChild(notification);
+
+        // Remove notification after 5 seconds
+        setTimeout(() => {
+            notification.style.opacity = '0';
+            setTimeout(() => notification.remove(), 300);
+        }, 5000);
     }
   }
   
