@@ -17,11 +17,32 @@ class WordBankPopup {
   
     async loadWordBank() {
       try {
-        const response = await chrome.runtime.sendMessage({ action: 'getWordBank' });
+        console.log('Popup: Loading word bank...');
+        const response = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: 'getWordBank' }, (response) => {
+            console.log('Popup: Raw response from background:', response);
+            resolve(response);
+          });
+        });
+        
+        console.log('Popup: Processed word bank response:', response);
+        
+        if (!response) {
+          console.error('Popup: No response received from background script');
+          this.wordBank = {};
+          this.filteredWords = [];
+          return;
+        }
+
         this.wordBank = response.wordBank || {};
         this.filteredWords = Object.values(this.wordBank);
+        console.log('Popup: Word bank loaded with', Object.keys(this.wordBank).length, 'words');
+        
+        // Update the UI
+        this.renderWordList();
+        this.updateStats();
       } catch (error) {
-        console.error('Error loading word bank:', error);
+        console.error('Popup: Error loading word bank:', error);
         this.wordBank = {};
         this.filteredWords = [];
       }

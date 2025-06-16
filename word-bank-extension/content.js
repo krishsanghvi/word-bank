@@ -20,21 +20,36 @@ class WordBankExtension {
       
       if (selectedText && this.isValidWord(selectedText)) {
         this.selectedWord = selectedText.toLowerCase();
+        // Store the selection coordinates for popup positioning
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        this.selectionCoords = {
+          x: rect.left + window.scrollX,
+          y: rect.bottom + window.scrollY
+        };
       } else {
         this.selectedWord = '';
+        this.selectionCoords = null;
       }
     }
   
     handleContextMenu(event) {
       if (this.selectedWord) {
+        // Only prevent default if we have a valid word
         event.preventDefault();
-        this.showDefinitionPopup(event.pageX, event.pageY);
+        event.stopPropagation();
+        
+        // Use stored coordinates or fallback to event coordinates
+        const x = this.selectionCoords ? this.selectionCoords.x : event.pageX;
+        const y = this.selectionCoords ? this.selectionCoords.y : event.pageY;
+        
+        this.showDefinitionPopup(x, y);
       }
     }
   
     isValidWord(text) {
-      // Check if the selected text is a single word (no spaces, reasonable length)
-      return /^[a-zA-Z-']+$/.test(text) && text.length > 1 && text.length < 50;
+      // More lenient word validation
+      return /^[a-zA-Z][a-zA-Z-']*$/.test(text) && text.length > 1 && text.length < 50;
     }
   
     async showDefinitionPopup(x, y) {
@@ -54,9 +69,18 @@ class WordBankExtension {
         </div>
       `;
   
-      // Position popup
-      this.definitionPopup.style.left = Math.min(x, window.innerWidth - 320) + 'px';
-      this.definitionPopup.style.top = Math.min(y, window.innerHeight - 200) + 'px';
+      // Calculate popup position
+      const popupWidth = 320;
+      const popupHeight = 200;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      
+      // Ensure popup stays within viewport
+      const left = Math.min(Math.max(x, 0), viewportWidth - popupWidth);
+      const top = Math.min(Math.max(y, 0), viewportHeight - popupHeight);
+
+      this.definitionPopup.style.left = `${left}px`;
+      this.definitionPopup.style.top = `${top}px`;
   
       document.body.appendChild(this.definitionPopup);
   
@@ -124,24 +148,41 @@ class WordBankExtension {
     }
   
     async saveWord(definitionData) {
-      const wordEntry = {
-        word: this.selectedWord,
-        timestamp: Date.now(),
-        url: window.location.href,
-        pageTitle: document.title,
-        definitions: definitionData ? this.extractDefinitions(definitionData) : [],
-        saved: true
-      };
-  
-      // Send to background script for storage
-      chrome.runtime.sendMessage({
-        action: 'saveWord',
-        wordEntry: wordEntry
-      }, (response) => {
-        if (response.success) {
+      try {
+        console.log('Attempting to save word:', this.selectedWord);
+        const wordEntry = {
+          word: this.selectedWord,
+          timestamp: Date.now(),
+          url: window.location.href,
+          pageTitle: document.title,
+          definitions: definitionData ? this.extractDefinitions(definitionData) : [],
+          saved: true
+        };
+        console.log('Word entry prepared:', wordEntry);
+
+        // Send to background script for storage and wait for response
+        const response = await new Promise((resolve) => {
+          console.log('Sending message to background script...');
+          chrome.runtime.sendMessage({
+            action: 'saveWord',
+            wordEntry: wordEntry
+          }, (response) => {
+            console.log('Received response from background:', response);
+            resolve(response);
+          });
+        });
+
+        if (response && response.success) {
+          console.log('Word saved successfully');
           this.showSaveConfirmation();
+        } else {
+          console.error('Failed to save word - no success response');
+          throw new Error('Failed to save word');
         }
-      });
+      } catch (error) {
+        console.error('Error saving word:', error);
+        this.showSaveError();
+      }
     }
   
     extractDefinitions(data) {
@@ -163,6 +204,20 @@ class WordBankExtension {
       const originalText = saveBtn.textContent;
       saveBtn.textContent = '✅ Saved!';
       saveBtn.style.backgroundColor = '#4CAF50';
+      
+      setTimeout(() => {
+        if (this.definitionPopup) {
+          saveBtn.textContent = originalText;
+          saveBtn.style.backgroundColor = '';
+        }
+      }, 2000);
+    }
+  
+    showSaveError() {
+      const saveBtn = this.definitionPopup.querySelector('.save-word-btn');
+      const originalText = saveBtn.textContent;
+      saveBtn.textContent = '❌ Save Failed';
+      saveBtn.style.backgroundColor = '#f44336';
       
       setTimeout(() => {
         if (this.definitionPopup) {

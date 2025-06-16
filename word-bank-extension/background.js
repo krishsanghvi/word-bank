@@ -33,58 +33,93 @@ class WordBankBackground {
     }
   
     async handleMessage(request, sender, sendResponse) {
-      switch (request.action) {
-        case 'saveWord':
-          const result = await this.saveWordToStorage(request.wordEntry);
-          sendResponse({ success: result });
-          break;
-          
-        case 'getWordBank':
-          const wordBank = await this.getWordBank();
-          sendResponse({ wordBank });
-          break;
-          
-        case 'deleteWord':
-          const deleted = await this.deleteWord(request.word);
-          sendResponse({ success: deleted });
-          break;
-          
-        case 'exportWordBank':
-          const exportData = await this.exportWordBank();
-          sendResponse({ data: exportData });
-          break;
-      }
+      console.log('Background script received message:', request.action);
+      
+      // Wrap the entire handler in a Promise to ensure async operations complete
+      const handleRequest = async () => {
+        try {
+          switch (request.action) {
+            case 'saveWord':
+              console.log('Attempting to save word:', request.wordEntry.word);
+              const result = await this.saveWordToStorage(request.wordEntry);
+              console.log('Save result:', result);
+              return { success: result };
+              
+            case 'getWordBank':
+              console.log('Fetching word bank');
+              const wordBank = await this.getWordBank();
+              console.log('Word bank retrieved:', Object.keys(wordBank).length, 'words');
+              return { wordBank: wordBank };
+              
+            case 'deleteWord':
+              console.log('Attempting to delete word:', request.word);
+              const deleted = await this.deleteWord(request.word);
+              console.log('Delete result:', deleted);
+              return { success: deleted };
+              
+            case 'exportWordBank':
+              console.log('Exporting word bank');
+              const exportData = await this.exportWordBank();
+              return { data: exportData };
+          }
+        } catch (error) {
+          console.error('Error handling message:', error);
+          return { success: false, error: error.message };
+        }
+      };
+
+      // Execute the handler and send the response
+      handleRequest().then(response => {
+        console.log('Sending response:', response);
+        sendResponse(response);
+      });
+
       return true; // Keep message channel open for async response
     }
   
     async saveWordToStorage(wordEntry) {
       try {
-        // Get existing word bank
+        console.log('Getting existing word bank...');
         const result = await chrome.storage.local.get(['wordBank']);
         const wordBank = result.wordBank || {};
+        console.log('Current word bank size:', Object.keys(wordBank).length);
         
         // Add new word (or update existing)
-        wordBank[wordEntry.word] = wordEntry;
+        wordBank[wordEntry.word] = {
+          ...wordEntry,
+          lastUpdated: Date.now()
+        };
+        console.log('Updated word bank size:', Object.keys(wordBank).length);
         
         // Save back to storage
+        console.log('Saving to chrome.storage...');
         await chrome.storage.local.set({ wordBank });
+        console.log('Storage update complete');
         
         // Update badge
         this.updateBadge(Object.keys(wordBank).length);
         
         return true;
       } catch (error) {
-        console.error('Error saving word:', error);
+        console.error('Error in saveWordToStorage:', error);
         return false;
       }
     }
   
     async getWordBank() {
       try {
+        console.log('Getting word bank from storage...');
         const result = await chrome.storage.local.get(['wordBank']);
-        return result.wordBank || {};
+        if (!result.wordBank) {
+          console.log('No word bank found, initializing empty bank');
+          const emptyBank = {};
+          await chrome.storage.local.set({ wordBank: emptyBank });
+          return emptyBank;
+        }
+        console.log('Word bank retrieved successfully');
+        return result.wordBank;
       } catch (error) {
-        console.error('Error getting word bank:', error);
+        console.error('Error in getWordBank:', error);
         return {};
       }
     }
