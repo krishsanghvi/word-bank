@@ -1,5 +1,20 @@
 // Background script for handling storage and context menus
 
+// Listen for extension icon click to open/focus the word bank tab
+chrome.action.onClicked.addListener(async () => {
+  const url = chrome.runtime.getURL('wordbank.html');
+  // Query all tabs to see if the word bank is already open
+  const tabs = await chrome.tabs.query({ url });
+  if (tabs.length > 0) {
+    // Focus the first matching tab
+    chrome.tabs.update(tabs[0].id, { active: true });
+    chrome.windows.update(tabs[0].windowId, { focused: true });
+  } else {
+    // Open a new tab
+    chrome.tabs.create({ url });
+  }
+});
+
 class WordBankBackground {
     constructor() {
       this.init();

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "browser": {
+      "type": "browser",
+      "enabled": true,
+      "port": 9222,
+      "host": "localhost",
+      "logLevel": "error"
+    }
+  }
+}

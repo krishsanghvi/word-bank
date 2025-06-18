@@ -13,6 +13,7 @@ class WordBankPopup {
       this.setupEventListeners();
       this.renderWordList();
       this.updateStats();
+      this.initTheme();
     }
   
     async loadWordBank() {
@@ -49,8 +50,16 @@ class WordBankPopup {
       // Search functionality
       const searchBox = document.getElementById('searchBox');
       searchBox.addEventListener('input', (e) => {
-        this.filterWords(e.target.value);
+        this.filterWords(e.target.value, this.getSelectedCategory());
       });
+  
+      // Category filter
+      const categoryFilter = document.getElementById('categoryFilter');
+      if (categoryFilter) {
+        categoryFilter.addEventListener('change', (e) => {
+          this.filterWords(searchBox.value, e.target.value);
+        });
+      }
   
       // Sort button
       const sortBtn = document.getElementById('sortBtn');
@@ -71,22 +80,24 @@ class WordBankPopup {
       });
     }
   
-    filterWords(searchTerm) {
-      const term = searchTerm.toLowerCase().trim();
-      
-      if (!term) {
-        this.filteredWords = [...this.wordBank];
-      } else {
-        this.filteredWords = this.wordBank.filter(word => 
-          word.word.toLowerCase().includes(term) ||
-          (word.definitions && word.definitions.some(def => 
+    filterWords(searchTerm, category) {
+      const term = searchTerm ? searchTerm.toLowerCase().trim() : '';
+      const selectedCategory = category || this.getSelectedCategory();
+      this.filteredWords = this.wordBank.filter(word => {
+        const matchesTerm = !term || word.word.toLowerCase().includes(term) ||
+          (word.definitions && word.definitions.some(def =>
             def.definition.toLowerCase().includes(term) ||
             (def.partOfSpeech && def.partOfSpeech.toLowerCase().includes(term))
-          ))
-        );
-      }
-      
+          ));
+        const matchesCategory = !selectedCategory || (word.category || (word.definitions && word.definitions[0]?.partOfSpeech) || '').toLowerCase() === selectedCategory;
+        return matchesTerm && matchesCategory;
+      });
       this.renderWordList();
+    }
+  
+    getSelectedCategory() {
+      const categoryFilter = document.getElementById('categoryFilter');
+      return categoryFilter ? categoryFilter.value : '';
     }
   
     toggleSort() {
@@ -138,83 +149,79 @@ class WordBankPopup {
             return null;
         }
 
-        console.log('Creating word item for:', word);
-        
         const wordItem = document.createElement('div');
         wordItem.className = 'word-item';
-        
+        // Add ripple effect on click
+        wordItem.addEventListener('click', function(e) {
+          const ripple = document.createElement('span');
+          ripple.className = 'ripple';
+          ripple.style.left = `${e.offsetX}px`;
+          ripple.style.top = `${e.offsetY}px`;
+          wordItem.appendChild(ripple);
+          setTimeout(() => ripple.remove(), 600);
+        });
+
+        // Category badge
+        let category = word.category || (word.definitions && word.definitions[0]?.partOfSpeech) || 'other';
+        category = category.toLowerCase();
+        const badge = document.createElement('span');
+        badge.className = `category-badge category-${category}`;
+        badge.textContent = category.charAt(0).toUpperCase() + category.slice(1);
+        wordItem.appendChild(badge);
+
         // Create word header
         const wordHeader = document.createElement('div');
         wordHeader.className = 'word-header';
-        
-        const wordText = document.createElement('span');
+        const wordText = document.createElement('div');
         wordText.className = 'word-text';
-        wordText.textContent = word.word || 'Unknown word';
-        
+        wordText.innerHTML = `<i class="fas fa-book"></i>${word.word || 'Unknown word'}`;
         const timestamp = document.createElement('span');
         timestamp.className = 'timestamp';
         timestamp.textContent = word.timestamp ? new Date(word.timestamp).toLocaleDateString() : 'Unknown date';
-        
         wordHeader.appendChild(wordText);
         wordHeader.appendChild(timestamp);
-        
+        wordItem.appendChild(wordHeader);
+
         // Create word details
         const wordDetails = document.createElement('div');
         wordDetails.className = 'word-details';
-        
-        // Add definitions if they exist
-        if (word.definitions && Array.isArray(word.definitions)) {
+        if (word.definitions && Array.isArray(word.definitions) && word.definitions.length > 0) {
             const definitionsList = document.createElement('ul');
             definitionsList.className = 'definitions-list';
-            
-            word.definitions.forEach(def => {
-                if (def && typeof def === 'object') {
-                    const li = document.createElement('li');
-                    li.textContent = def.definition || 'No definition available';
-                    definitionsList.appendChild(li);
-                }
-            });
-            
-            if (definitionsList.children.length > 0) {
-                wordDetails.appendChild(definitionsList);
+            const firstDef = word.definitions[0];
+            if (firstDef && typeof firstDef === 'object') {
+                const li = document.createElement('li');
+                li.textContent = firstDef.definition || 'No definition available';
+                definitionsList.appendChild(li);
             }
+            wordDetails.appendChild(definitionsList);
         }
-        
         // Add source information with URL
         const sourceInfo = document.createElement('div');
         sourceInfo.className = 'source-info';
-        
-        // Create source link
         const sourceLink = document.createElement('a');
         sourceLink.href = word.url || '#';
         sourceLink.target = '_blank';
         sourceLink.className = 'source-link';
-        sourceLink.textContent = word.pageTitle || 'Source';
+        sourceLink.innerHTML = `<i class="fas fa-external-link-alt"></i>${word.pageTitle || 'Source'}`;
         sourceLink.title = word.url || '';
-        
-        // Create URL display
         const urlDisplay = document.createElement('div');
         urlDisplay.className = 'url-display';
         urlDisplay.textContent = word.url || 'No URL available';
-        
         sourceInfo.appendChild(sourceLink);
         sourceInfo.appendChild(urlDisplay);
         wordDetails.appendChild(sourceInfo);
-        
+        wordItem.appendChild(wordDetails);
         // Add delete button
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-word-btn';
-        deleteBtn.textContent = '×';
+        deleteBtn.innerHTML = '<i class="fas fa-times"></i>';
         deleteBtn.title = 'Delete word';
         deleteBtn.onclick = (e) => {
             e.stopPropagation();
             this.deleteWord(word.word);
         };
-        
-        wordItem.appendChild(wordHeader);
-        wordItem.appendChild(wordDetails);
         wordItem.appendChild(deleteBtn);
-        
         return wordItem;
     }
   
@@ -340,6 +347,28 @@ class WordBankPopup {
         console.error('Popup: Error saving word:', error);
         return false;
       }
+    }
+
+    initTheme() {
+      const themeToggle = document.getElementById('themeToggle');
+      const savedTheme = localStorage.getItem('wordBankTheme') || 'light';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+      this.updateThemeIcon(savedTheme);
+
+      themeToggle.addEventListener('click', () => {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('wordBankTheme', newTheme);
+        this.updateThemeIcon(newTheme);
+      });
+    }
+
+    updateThemeIcon(theme) {
+      const themeToggle = document.getElementById('themeToggle');
+      themeToggle.innerHTML = theme === 'light' ? 
+        '<i class="fas fa-moon"></i>' : 
+        '<i class="fas fa-sun"></i>';
     }
   }
   
